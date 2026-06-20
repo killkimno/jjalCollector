@@ -4,7 +4,8 @@ const DEFAULT_OPTIONS = {
   folder: "jjal-collector",
   includeBackgrounds: true,
   includeSrcset: true,
-  hideDownloadUi: true
+  hideDownloadUi: true,
+  saveByDate: true
 };
 
 const MIN_IMAGE_DIMENSION = 480;
@@ -20,11 +21,16 @@ const DEFAULT_RUNTIME = {
 
 const DAILY_STATS_KEY = "dailyStats";
 const DAILY_DOWNLOADS_KEY = "dailyDownloads";
+const DAILY_DOWNLOADS_FILENAME = "download-list.json";
+const LOG_KEY = "collectorLogs";
+const MAX_LOG_ENTRIES = 200;
 
 const tabStates = new Map();
 const pausedHosts = new Map();
+let lastActiveWebTabId = null;
 let dailyStatsWriteQueue = Promise.resolve();
 let dailyDownloadsWriteQueue = Promise.resolve();
+let logWriteQueue = Promise.resolve();
 
 chrome.runtime.onInstalled.addListener(async () => {
   const existing = await chrome.storage.sync.get(Object.keys(DEFAULT_OPTIONS));
@@ -55,8 +61,11 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   syncDownloadUiVisibility();
 });
 
-chrome.tabs.onActivated.addListener(() => {
-  syncActiveTabCollection();
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  const tab = await getTabById(activeInfo.tabId);
+  await syncActiveTabCollection(tab?.id || null, {
+    preserveLastWebTab: isOwnExtensionUrl(tab?.url)
+  });
 });
 
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
@@ -91,11 +100,21 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "local" && changes.collectorActive) {
     syncActionIcon();
     syncDownloadUiVisibility();
-    syncActiveTabCollection();
   }
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "SCAN_SUMMARY") {
+    addLog("info", "페이지 스캔 완료", {
+      pageUrl: sender.tab?.url || "",
+      images: toNonNegativeNumber(message.images),
+      srcset: toNonNegativeNumber(message.srcset),
+      backgrounds: toNonNegativeNumber(message.backgrounds)
+    });
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (message?.type === "IMAGE_CANDIDATES") {
     const tabId = sender.tab?.id;
     handleImageCandidates(tabId, message.candidates || [], sender.tab?.url || "")
@@ -134,6 +153,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "CLEAR_LOGS") {
+    clearLogs()
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
   return false;
 });
 
@@ -158,8 +184,10 @@ function getState(tabId) {
 async function getPublicState(tabId) {
   const state = getState(tabId);
   const stats = await getDailyStats();
+  const collectorActive = await isCollectorActive();
   return {
-    active: state.active,
+    active: collectorActive,
+    collecting: state.active,
     downloaded: stats.downloaded,
     skipped: stats.skipped,
     errors: stats.errors,
@@ -171,10 +199,11 @@ async function getPublicState(tabId) {
 
 async function setCollectorActive(sourceTabId, active) {
   await chrome.storage.local.set({ collectorActive: active });
+  addLog("info", active ? "수집 켜짐" : "수집 꺼짐", { tabId: sourceTabId });
 
   if (active) {
     getState(sourceTabId).stopReason = "";
-    await syncActiveTabCollection();
+    await syncActiveTabCollection(sourceTabId);
     await syncDownloadUiVisibility();
     return getPublicState(sourceTabId);
   }
@@ -212,7 +241,11 @@ function resetTabStats(tabId) {
 
 async function resetDailyStats(tabId) {
   dailyStatsWriteQueue = dailyStatsWriteQueue.then(() => saveDailyStats(createEmptyDailyStats()));
-  dailyDownloadsWriteQueue = dailyDownloadsWriteQueue.then(() => saveDailyDownloads(createEmptyDailyDownloads()));
+  dailyDownloadsWriteQueue = dailyDownloadsWriteQueue.then(async () => {
+    const downloads = createEmptyDailyDownloads();
+    await saveDailyDownloads(downloads);
+    await tryExportDailyDownloads(downloads, await getOptions());
+  });
   await dailyStatsWriteQueue;
   await dailyDownloadsWriteQueue;
   resetTabStats(tabId);
@@ -292,30 +325,35 @@ async function getDailyDownloadsRaw() {
     ...downloads,
     date: today,
     filenames: downloads.filenames || {},
+    urls: downloads.urls || {},
     items: Array.isArray(downloads.items) ? downloads.items : []
   };
 }
 
-async function hasDownloadedToday(originalName) {
+async function hasDownloadedToday(imageUrl) {
   const downloads = await getDailyDownloads();
-  return Boolean(downloads.filenames[originalName]);
+  return Boolean(downloads.urls[imageUrl]);
 }
 
-function addDailyDownload(originalName, siteUrl, imageUrl) {
+function addDailyDownload(originalName, savedName, siteUrl, imageUrl, options) {
   dailyDownloadsWriteQueue = dailyDownloadsWriteQueue
     .then(async () => {
       const downloads = await getDailyDownloadsRaw();
-      if (downloads.filenames[originalName]) {
+      if (downloads.urls[imageUrl]) {
         return;
       }
 
       downloads.filenames[originalName] = true;
+      downloads.urls[imageUrl] = true;
       downloads.items.push({
         filename: originalName,
+        savedName,
         siteUrl,
-        imageUrl
+        imageUrl,
+        savedAt: new Date().toISOString()
       });
       await saveDailyDownloads(downloads);
+      await tryExportDailyDownloads(downloads, options);
     })
     .catch((error) => {
       console.warn("Jjal Collector could not update daily download list:", error);
@@ -330,10 +368,81 @@ async function saveDailyDownloads(downloads) {
   });
 }
 
+function addLog(level, message, details = {}) {
+  const entry = {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    time: new Date().toISOString(),
+    level,
+    message,
+    details
+  };
+
+  logWriteQueue = logWriteQueue
+    .then(async () => {
+      const stored = await chrome.storage.local.get({ [LOG_KEY]: [] });
+      const logs = Array.isArray(stored[LOG_KEY]) ? stored[LOG_KEY] : [];
+      logs.push(entry);
+      await chrome.storage.local.set({
+        [LOG_KEY]: logs.slice(-MAX_LOG_ENTRIES)
+      });
+    })
+    .catch((error) => {
+      console.warn("Jjal Collector could not write log:", error);
+    });
+
+  return logWriteQueue;
+}
+
+async function clearLogs() {
+  logWriteQueue = logWriteQueue.then(() => chrome.storage.local.set({ [LOG_KEY]: [] }));
+  return logWriteQueue;
+}
+
+async function exportDailyDownloads(downloads, options) {
+  const filename = buildDailyDownloadsFilename(options.folder);
+  const body = JSON.stringify(createDailyDownloadsExport(downloads), null, 2);
+  const url = `data:application/json;charset=utf-8,${encodeURIComponent(body)}`;
+
+  const downloadId = await chrome.downloads.download({
+    url,
+    filename,
+    conflictAction: "overwrite",
+    saveAs: false
+  });
+  await waitForDownloadComplete(downloadId);
+  await eraseDownloadHistory(downloadId);
+}
+
+async function tryExportDailyDownloads(downloads, options) {
+  try {
+    await exportDailyDownloads(downloads, options);
+  } catch (error) {
+    console.warn("Jjal Collector could not write daily download list file:", error);
+  }
+}
+
+function createDailyDownloadsExport(downloads) {
+  const items = Array.isArray(downloads.items) ? downloads.items : [];
+  return {
+    date: downloads.date || getTodayKey(),
+    count: items.length,
+    items
+  };
+}
+
+function countCandidateSources(candidates) {
+  return candidates.reduce((counts, candidate) => {
+    const source = candidate?.source || "unknown";
+    counts[source] = (counts[source] || 0) + 1;
+    return counts;
+  }, {});
+}
+
 function createEmptyDailyDownloads() {
   return {
     date: getTodayKey(),
     filenames: {},
+    urls: {},
     items: []
   };
 }
@@ -367,6 +476,7 @@ async function pauseHostForFailure(tabId, host, reason) {
 async function handleContentReady(tabId, pageUrl) {
   const collectorActive = await isCollectorActive();
   if (tabId === undefined) {
+    addLog("warn", "콘텐츠 준비 메시지에 탭 ID가 없습니다.", { pageUrl });
     return { active: false };
   }
 
@@ -381,6 +491,11 @@ async function handleContentReady(tabId, pageUrl) {
   state.stopReason = pausedReason;
   await updateBadge(tabId);
   await syncDownloadUiVisibility();
+  addLog("info", "콘텐츠 준비", {
+    pageUrl,
+    active: state.active,
+    stopReason: state.stopReason || ""
+  });
 
   return {
     active: state.active,
@@ -390,6 +505,11 @@ async function handleContentReady(tabId, pageUrl) {
 
 async function handleImageCandidates(tabId, candidates, pageUrl) {
   if (tabId === undefined || !(await isCollectorActive()) || !(await isFocusedActiveTab(tabId))) {
+    addLog("info", "후보 무시", {
+      pageUrl,
+      count: candidates.length,
+      reason: tabId === undefined ? "탭 ID 없음" : "수집 꺼짐 또는 비활성 탭"
+    });
     if (tabId !== undefined) {
       const state = getState(tabId);
       state.active = false;
@@ -409,9 +529,19 @@ async function handleImageCandidates(tabId, candidates, pageUrl) {
     state.queued = 0;
     state.stopReason = pausedReason;
     await updateBadge(tabId);
+    addLog("warn", "일시 중단된 호스트라 후보를 무시했습니다.", {
+      pageUrl,
+      count: candidates.length,
+      reason: pausedReason
+    });
     return;
   }
 
+  addLog("info", "이미지 후보 수신", {
+    pageUrl,
+    count: candidates.length,
+    sources: countCandidateSources(candidates)
+  });
   await enqueueCandidates(tabId, candidates, pageUrl);
 }
 
@@ -423,16 +553,38 @@ async function enqueueCandidates(tabId, candidates, pageUrl) {
 
   const dailyDownloads = await getDailyDownloads();
   let seenAdded = 0;
+  const skipped = {
+    invalid: 0,
+    duplicateInPage: 0,
+    undersized: 0,
+    pausedHost: 0,
+    downloadedToday: 0
+  };
   for (const candidate of candidates) {
     const normalized = normalizeCandidate(candidate, pageUrl);
     const key = normalized ? getCandidateKey(normalized) : "";
-    if (
-      !normalized ||
-      state.seen.has(key) ||
-      isUndersizedCandidate(normalized) ||
-      isHostPaused(getCandidateHost(normalized)) ||
-      dailyDownloads.filenames[getOriginalFilename(normalized.url)]
-    ) {
+    if (!normalized) {
+      skipped.invalid += 1;
+      continue;
+    }
+
+    if (state.seen.has(key)) {
+      skipped.duplicateInPage += 1;
+      continue;
+    }
+
+    if (isUndersizedCandidate(normalized)) {
+      skipped.undersized += 1;
+      continue;
+    }
+
+    if (isHostPaused(getCandidateHost(normalized))) {
+      skipped.pausedHost += 1;
+      continue;
+    }
+
+    if (dailyDownloads.urls[normalized.url]) {
+      skipped.downloadedToday += 1;
       continue;
     }
 
@@ -444,6 +596,14 @@ async function enqueueCandidates(tabId, candidates, pageUrl) {
   if (seenAdded > 0) {
     await addDailyStat("seen", seenAdded);
   }
+
+  addLog(seenAdded > 0 ? "info" : "warn", "후보 큐 반영", {
+    pageUrl,
+    received: candidates.length,
+    queued: seenAdded,
+    queueTotal: state.queue.length,
+    skipped
+  });
 
   runQueue(tabId);
 }
@@ -491,9 +651,17 @@ async function runQueue(tabId) {
           resetFailureState(state);
         } else {
           await addDailyStat("skipped");
+          addLog("info", "이미지 스킵", {
+            url: candidate.url,
+            reason: result
+          });
         }
       } catch (error) {
         console.warn("Jjal Collector failed:", candidate.url, error);
+        addLog("error", "이미지 처리 실패", {
+          url: candidate.url,
+          error: error?.message || String(error)
+        });
         await addDailyStat("errors");
         if (await shouldStopAfterFailure(tabId, candidate, error)) {
           break;
@@ -546,16 +714,38 @@ async function getOptions() {
     folder: sanitizeFolder(stored.folder || DEFAULT_OPTIONS.folder),
     includeBackgrounds: stored.includeBackgrounds !== false,
     includeSrcset: stored.includeSrcset !== false,
-    hideDownloadUi: stored.hideDownloadUi !== false
+    hideDownloadUi: stored.hideDownloadUi !== false,
+    saveByDate: stored.saveByDate !== false
   };
 }
 
-async function syncActiveTabCollection() {
+async function syncActiveTabCollection(preferredActiveTabId = null, options = {}) {
   const collectorActive = await isCollectorActive();
-  const activeTab = collectorActive ? await getFocusedActiveTab() : null;
+  let activeTab = collectorActive ? await getFocusedActiveTab(preferredActiveTabId) : null;
+
+  if (
+    collectorActive &&
+    (!activeTab || isOwnExtensionUrl(activeTab.url) || (options.preserveLastWebTab && !isWebUrl(activeTab.url)))
+  ) {
+    activeTab = await getTabById(lastActiveWebTabId);
+  }
+
+  if (collectorActive && activeTab?.id && isWebUrl(activeTab.url)) {
+    lastActiveWebTabId = activeTab.id;
+  }
+
   const activeTabId = activeTab?.id;
   const scanOptions = collectorActive ? getContentScanOptions(await getOptions()) : null;
   const tabs = await chrome.tabs.query({});
+
+  if (collectorActive) {
+    addLog(activeTabId ? "info" : "warn", "활성 탭 동기화", {
+      preferredActiveTabId,
+      preserveLastWebTab: Boolean(options.preserveLastWebTab),
+      activeTabId: activeTabId || null,
+      activeTabUrl: activeTab?.url || ""
+    });
+  }
 
   await Promise.all(tabs.map(async (tab) => {
     if (!tab.id) {
@@ -615,27 +805,34 @@ async function sendCollectorStateToTab(tab, active, scanOptions) {
 
 async function collectCandidate(candidate, options) {
   if (candidate.source === "background" && !options.includeBackgrounds) {
-    return "skipped";
+    return "background-disabled";
   }
 
   if (candidate.source === "srcset" && !options.includeSrcset) {
-    return "skipped";
+    return "srcset-disabled";
   }
 
   if (candidate.width < options.minWidth) {
-    return "skipped";
+    return "min-width";
   }
 
   if (candidate.height < options.minHeight) {
-    return "skipped";
+    return "min-height";
   }
 
   const originalName = getOriginalFilename(candidate.url);
-  if (await hasDownloadedToday(originalName)) {
-    return "skipped";
+  if (await hasDownloadedToday(candidate.url)) {
+    return "downloaded-today";
   }
 
-  const filename = buildFilename(options.folder, originalName);
+  const filename = buildFilename(options.folder, originalName, options.saveByDate);
+  addLog("info", "다운로드 시작", {
+    url: candidate.url,
+    filename,
+    width: candidate.width,
+    height: candidate.height,
+    source: candidate.source
+  });
   const downloadId = await chrome.downloads.download({
     url: candidate.url,
     filename,
@@ -643,7 +840,12 @@ async function collectCandidate(candidate, options) {
     saveAs: false
   });
   await waitForDownloadComplete(downloadId);
-  await addDailyDownload(originalName, candidate.pageUrl || candidate.url, candidate.url);
+  await eraseDownloadHistory(downloadId);
+  await addDailyDownload(originalName, filename, candidate.pageUrl || candidate.url, candidate.url, options);
+  addLog("info", "다운로드 완료", {
+    url: candidate.url,
+    filename
+  });
   await sleep(randomDelayMs());
 
   return "downloaded";
@@ -700,6 +902,14 @@ function waitForDownloadComplete(downloadId) {
         reject(error);
       });
   });
+}
+
+async function eraseDownloadHistory(downloadId) {
+  try {
+    await chrome.downloads.erase({ id: downloadId });
+  } catch (error) {
+    console.warn("Jjal Collector could not erase download history:", error);
+  }
 }
 
 function normalizeCandidate(candidate, pageUrl = "") {
@@ -786,8 +996,17 @@ function getOriginalFilename(url) {
   return finalName;
 }
 
-function buildFilename(folder, originalName) {
-  return `${folder}/${Date.now()}-${originalName}`;
+function buildFilename(folder, originalName, saveByDate) {
+  const dateFolder = saveByDate ? `${getTodayFolderName()}/` : "";
+  return `${folder}/${dateFolder}${Date.now()}-${originalName}`;
+}
+
+function buildDailyDownloadsFilename(folder) {
+  return `${folder}/${DAILY_DOWNLOADS_FILENAME}`;
+}
+
+function getTodayFolderName() {
+  return getTodayKey().replace(/-/g, "");
 }
 
 function sanitizeFolder(folder) {
@@ -971,22 +1190,57 @@ async function isCollectorActive() {
 
 async function isFocusedActiveTab(tabId) {
   const activeTab = await getFocusedActiveTab();
-  return activeTab?.id === tabId;
+  if (activeTab?.id === tabId) {
+    return true;
+  }
+
+  return isOwnExtensionUrl(activeTab?.url) && lastActiveWebTabId === tabId;
 }
 
-async function getFocusedActiveTab() {
-  try {
-    const window = await chrome.windows.getLastFocused();
-    if (!window?.id) {
-      return null;
-    }
+async function getTabById(tabId) {
+  if (tabId === null || tabId === undefined) {
+    return null;
+  }
 
-    const tabs = await chrome.tabs.query({
+  try {
+    return await chrome.tabs.get(tabId);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function getFocusedActiveTab(preferredTabId = null) {
+  if (preferredTabId !== null && preferredTabId !== undefined) {
+    try {
+      const preferredTab = await chrome.tabs.get(preferredTabId);
+      if (preferredTab?.id && isWebUrl(preferredTab.url)) {
+        return preferredTab;
+      }
+    } catch (_) {
+      // Fall through to the browser-focused tab lookup.
+    }
+  }
+
+  try {
+    const lastFocusedTabs = await chrome.tabs.query({
       active: true,
-      windowId: window.id
+      lastFocusedWindow: true
     });
 
-    return tabs[0] || null;
+    if (lastFocusedTabs[0]?.id) {
+      return lastFocusedTabs[0];
+    }
+  } catch (_) {
+    // Fall through to normal-window lookup.
+  }
+
+  try {
+    const windows = await chrome.windows.getAll({
+      populate: true,
+      windowTypes: ["normal"]
+    });
+    const focusedWindow = windows.find((window) => window.focused) || windows[0];
+    return focusedWindow?.tabs?.find((tab) => tab.active) || null;
   } catch (_) {
     return null;
   }
@@ -994,6 +1248,10 @@ async function getFocusedActiveTab() {
 
 function isWebUrl(url) {
   return typeof url === "string" && /^https?:\/\//i.test(url);
+}
+
+function isOwnExtensionUrl(url) {
+  return typeof url === "string" && url.startsWith(chrome.runtime.getURL(""));
 }
 
 function isMissingContentScriptError(error) {

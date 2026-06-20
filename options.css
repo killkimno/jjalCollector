@@ -52,6 +52,23 @@ h2 {
   letter-spacing: 0;
 }
 
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.sectionHeader h2 {
+  margin-bottom: 0;
+}
+
+.buttonRow {
+  display: flex;
+  gap: 8px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -134,6 +151,76 @@ button:hover {
   background: #1d4ed8;
 }
 
+button.secondary {
+  border: 1px solid #cbd5e1;
+  padding: 7px 10px;
+  color: #334155;
+  background: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+button.secondary:hover {
+  background: #f1f5f9;
+}
+
+.logList {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.logEmpty,
+.logItem {
+  padding: 10px 12px;
+}
+
+.logItem + .logItem {
+  border-top: 1px solid rgba(226, 232, 240, 0.12);
+}
+
+.logMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #94a3b8;
+}
+
+.logLevel {
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.logLevel.info {
+  color: #93c5fd;
+}
+
+.logLevel.warn {
+  color: #fde68a;
+}
+
+.logLevel.error {
+  color: #fca5a5;
+}
+
+.logMessage {
+  margin-top: 3px;
+  color: #f8fafc;
+}
+
+.logDetails {
+  margin-top: 4px;
+  color: #cbd5e1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 @media (max-width: 560px) {
   .page {
     width: min(100% - 24px, 720px);
@@ -145,6 +232,11 @@ button:hover {
   }
 
   footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sectionHeader {
     align-items: stretch;
     flex-direction: column;
   }

@@ -111,23 +111,41 @@ async function scanPage() {
   scanInProgress = true;
   try {
     const imageCandidates = [];
+    const srcsetCandidates = [];
+    const backgroundCandidates = [];
+
     collectImageElements(imageCandidates);
     sendCandidates(imageCandidates);
 
     if (scanOptions.includeSrcset) {
-      const srcsetCandidates = [];
       await collectPictureSources(srcsetCandidates);
       sendCandidates(srcsetCandidates);
     }
 
     if (scanOptions.includeBackgrounds) {
-      const backgroundCandidates = [];
       await collectBackgroundImages(backgroundCandidates);
       sendCandidates(backgroundCandidates);
     }
+
+    sendScanSummary({
+      images: imageCandidates.length,
+      srcset: srcsetCandidates.length,
+      backgrounds: backgroundCandidates.length
+    });
   } finally {
     scanInProgress = false;
   }
+}
+
+function sendScanSummary(summary) {
+  if (!collectorActive) {
+    return;
+  }
+
+  sendRuntimeMessage({
+    type: "SCAN_SUMMARY",
+    ...summary
+  });
 }
 
 function sendCandidates(candidates) {

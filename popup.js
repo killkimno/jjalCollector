@@ -1,5 +1,6 @@
 let activeTabId = null;
 let refreshTimer = null;
+let settingActive = false;
 
 const activeToggle = document.getElementById("activeToggle");
 const downloadedCount = document.getElementById("downloadedCount");
@@ -17,11 +18,21 @@ activeToggle.addEventListener("change", async () => {
     return;
   }
 
-  const response = await chrome.runtime.sendMessage({
-    type: "SET_TAB_ACTIVE",
-    tabId: activeTabId,
-    active: activeToggle.checked
-  });
+  settingActive = true;
+  activeToggle.disabled = true;
+  const nextActive = activeToggle.checked;
+
+  let response = null;
+  try {
+    response = await chrome.runtime.sendMessage({
+      type: "SET_TAB_ACTIVE",
+      tabId: activeTabId,
+      active: nextActive
+    });
+  } finally {
+    settingActive = false;
+    activeToggle.disabled = false;
+  }
 
   if (!response?.ok) {
     activeToggle.checked = false;
@@ -67,7 +78,7 @@ async function init() {
 }
 
 async function refreshState() {
-  if (activeTabId === null) {
+  if (activeTabId === null || settingActive) {
     return;
   }
 
@@ -88,8 +99,10 @@ function renderState(state) {
   skippedCount.textContent = state.skipped;
   seenCount.textContent = state.seen;
 
-  if (state.active) {
+  if (state.collecting) {
     statusText.textContent = state.queued > 0 ? `${state.queued}개 처리 중` : "전체 수집 중";
+  } else if (state.active) {
+    statusText.textContent = "켜짐 - 현재 탭 대기 중";
   } else if (state.stopReason) {
     statusText.textContent = state.stopReason;
   } else {
