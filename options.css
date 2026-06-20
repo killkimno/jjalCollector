@@ -1,0 +1,151 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+body {
+  margin: 0;
+  color: #111827;
+  background: #f8fafc;
+}
+
+.page {
+  width: min(720px, calc(100% - 32px));
+  margin: 40px auto;
+}
+
+header {
+  margin-bottom: 18px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 28px;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+header p {
+  margin-top: 8px;
+  color: #64748b;
+}
+
+.panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+section {
+  padding: 20px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+h2 {
+  margin-bottom: 14px;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+label {
+  display: grid;
+  gap: 7px;
+  color: #334155;
+  font-size: 14px;
+}
+
+small,
+.hint {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.hint {
+  margin: 6px 0 12px 28px;
+}
+
+input[type="number"],
+input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #111827;
+  font: inherit;
+  font-size: 14px;
+}
+
+input:focus {
+  border-color: #2563eb;
+  outline: 3px solid rgba(37, 99, 235, 0.14);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.check input {
+  width: 18px;
+  height: 18px;
+}
+
+footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 16px 20px;
+}
+
+#saveStatus {
+  min-height: 20px;
+  color: #2563eb;
+  font-size: 14px;
+}
+
+button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 18px;
+  color: #ffffff;
+  background: #2563eb;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #1d4ed8;
+}
+
+@media (max-width: 560px) {
+  .page {
+    width: min(100% - 24px, 720px);
+    margin: 24px auto;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>짤 콜렉터 옵션</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <h1>짤 수집기 옵션</h1>
+        <p>기본값: 메인 OFF, 현재 포커스된 탭, 현재 화면에 보이는 480 x 480 이상 이미지.</p>
+      </header>
+
+      <form id="optionsForm" class="panel">
+        <section>
+          <h2>이미지 크기</h2>
+          <div class="grid">
+            <label>
+              <span>최소 너비 (px)</span>
+              <input id="minWidth" type="number" min="480" step="1">
+              <small>기본값 480</small>
+            </label>
+            <label>
+              <span>최소 높이 (px)</span>
+              <input id="minHeight" type="number" min="480" step="1">
+              <small>기본값 480</small>
+            </label>
+          </div>
+        </section>
+
+        <section>
+          <h2>저장</h2>
+          <label>
+            <span>Downloads 하위 폴더</span>
+            <input id="folder" type="text" spellcheck="false" placeholder="jjal-collector">
+          </label>
+          <label class="check">
+            <input id="hideDownloadUi" type="checkbox">
+            <span>수집 중 Chrome 다운로드 UI 숨기기</span>
+          </label>
+        </section>
+
+        <section>
+          <h2>수집 대상</h2>
+          <label class="check">
+            <input id="includeSrcset" type="checkbox">
+            <span>반응형 이미지 현재 소스 확인</span>
+          </label>
+          <p class="hint">기본값 ON. 화면에 보이는 이미지가 실제 선택한 srcset 소스만 확인합니다.</p>
+          <label class="check">
+            <input id="includeBackgrounds" type="checkbox">
+            <span>CSS 배경 이미지 포함</span>
+          </label>
+          <p class="hint">기본값 ON. 현재 화면에 보이는 요소의 배경 이미지만 확인합니다.</p>
+        </section>
+
+        <footer>
+          <p id="saveStatus" role="status"></p>
+          <button type="submit">저장</button>
+        </footer>
+      </form>
+    </main>
+
+    <script src="options.js"></script>
+  </body>
+</html>

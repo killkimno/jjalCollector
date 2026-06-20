@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>짤 콜렉터</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <header class="topbar">
+        <div>
+          <h1>짤 수집기</h1>
+          <p id="pageHost">전체 웹사이트</p>
+        </div>
+        <label class="switch" title="전체 수집 켜기">
+          <input id="activeToggle" type="checkbox">
+          <span></span>
+        </label>
+      </header>
+
+      <section class="stats" aria-label="수집 상태">
+        <div>
+          <strong id="downloadedCount">0</strong>
+          <span>오늘 저장</span>
+        </div>
+        <div>
+          <strong id="skippedCount">0</strong>
+          <span>오늘 제외</span>
+        </div>
+        <div>
+          <strong id="seenCount">0</strong>
+          <span>오늘 발견</span>
+        </div>
+      </section>
+
+      <p id="statusText" class="status">대기 중</p>
+
+      <footer class="actions">
+        <button id="resetButton" type="button">오늘 통계 초기화</button>
+        <button id="optionsButton" type="button">옵션</button>
+      </footer>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
