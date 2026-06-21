@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "짤 콜렉터",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Collect matching images from the active webpage into a downloads folder.",
   "permissions": [
     "activeTab",
