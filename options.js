@@ -5,7 +5,8 @@ const DEFAULTS = {
   includeBackgrounds: true,
   includeSrcset: true,
   hideDownloadUi: true,
-  saveByDate: true
+  saveByDate: true,
+  logEnabled: true
 };
 const MIN_IMAGE_DIMENSION = 480;
 const LOG_KEY = "collectorLogs";
@@ -18,6 +19,7 @@ const saveByDate = document.getElementById("saveByDate");
 const hideDownloadUi = document.getElementById("hideDownloadUi");
 const includeSrcset = document.getElementById("includeSrcset");
 const includeBackgrounds = document.getElementById("includeBackgrounds");
+const logEnabled = document.getElementById("logEnabled");
 const saveStatus = document.getElementById("saveStatus");
 const logList = document.getElementById("logList");
 const refreshLogs = document.getElementById("refreshLogs");
@@ -44,6 +46,7 @@ async function loadOptions() {
   hideDownloadUi.checked = options.hideDownloadUi !== false;
   includeSrcset.checked = options.includeSrcset !== false;
   includeBackgrounds.checked = options.includeBackgrounds !== false;
+  logEnabled.checked = options.logEnabled !== false;
   await loadLogs();
 }
 
@@ -57,7 +60,8 @@ async function saveOptions(event) {
     saveByDate: saveByDate.checked,
     hideDownloadUi: hideDownloadUi.checked,
     includeSrcset: includeSrcset.checked,
-    includeBackgrounds: includeBackgrounds.checked
+    includeBackgrounds: includeBackgrounds.checked,
+    logEnabled: logEnabled.checked
   });
 
   saveStatus.textContent = "저장됨";

@@ -5,7 +5,8 @@ const DEFAULT_OPTIONS = {
   includeBackgrounds: true,
   includeSrcset: true,
   hideDownloadUi: true,
-  saveByDate: true
+  saveByDate: true,
+  logEnabled: true
 };
 
 const MIN_IMAGE_DIMENSION = 480;
@@ -417,6 +418,10 @@ function addLog(level, message, details = {}) {
 
   logWriteQueue = logWriteQueue
     .then(async () => {
+      if (!(await isLogEnabled())) {
+        return;
+      }
+
       const stored = await chrome.storage.local.get({ [LOG_KEY]: [] });
       const logs = Array.isArray(stored[LOG_KEY]) ? stored[LOG_KEY] : [];
       logs.push(entry);
@@ -434,6 +439,11 @@ function addLog(level, message, details = {}) {
 async function clearLogs() {
   logWriteQueue = logWriteQueue.then(() => chrome.storage.local.set({ [LOG_KEY]: [] }));
   return logWriteQueue;
+}
+
+async function isLogEnabled() {
+  const stored = await chrome.storage.sync.get({ logEnabled: DEFAULT_OPTIONS.logEnabled });
+  return stored.logEnabled !== false;
 }
 
 function scheduleUpdateCheck() {
@@ -865,7 +875,8 @@ async function getOptions() {
     includeBackgrounds: stored.includeBackgrounds !== false,
     includeSrcset: stored.includeSrcset !== false,
     hideDownloadUi: stored.hideDownloadUi !== false,
-    saveByDate: stored.saveByDate !== false
+    saveByDate: stored.saveByDate !== false,
+    logEnabled: stored.logEnabled !== false
   };
 }
 
