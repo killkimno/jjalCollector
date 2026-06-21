@@ -93,6 +93,44 @@ small,
   margin: 6px 0 12px 28px;
 }
 
+.hint.flat {
+  margin-left: 0;
+}
+
+.linkList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.linkList div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+
+.linkList dt {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.linkList dd {
+  margin: 0;
+  color: #111827;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.linkList a {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.linkList a:hover {
+  text-decoration: underline;
+}
+
 input[type="number"],
 input[type="text"] {
   width: 100%;
@@ -239,5 +277,10 @@ button.secondary:hover {
   .sectionHeader {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .linkList div {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 }

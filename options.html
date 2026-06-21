@@ -43,7 +43,7 @@
           <p class="hint">기본값 ON. 예: Downloads/jjal-collector/20260621</p>
           <label class="check">
             <input id="hideDownloadUi" type="checkbox">
-            <span>수집 중 Chrome 다운로드 UI 숨기기</span>
+            <span>짤 콜렉터 다운로드를 Chrome 다운로드 목록에서 숨기기</span>
           </label>
         </section>
 
@@ -59,6 +59,43 @@
             <span>CSS 배경 이미지 포함</span>
           </label>
           <p class="hint">기본값 ON. 현재 화면에 보이는 요소의 배경 이미지만 확인합니다.</p>
+        </section>
+
+        <section>
+          <h2>정보</h2>
+          <dl class="linkList">
+            <div>
+              <dt>현재 버전</dt>
+              <dd id="appVersion">-</dd>
+            </div>
+            <div>
+              <dt>만든이</dt>
+              <dd>몽키해드</dd>
+            </div>
+            <div>
+              <dt>깃헙</dt>
+              <dd>
+                <a href="https://github.com/killkimno/jjalCollector" target="_blank" rel="noopener noreferrer">killkimno/jjalCollector</a>
+              </dd>
+            </div>
+            <div>
+              <dt>내 블로그</dt>
+              <dd>
+                <a href="https://blog.naver.com/killkimno" target="_blank" rel="noopener noreferrer">blog.naver.com/killkimno</a>
+              </dd>
+            </div>
+          </dl>
+        </section>
+
+        <section>
+          <div class="sectionHeader">
+            <h2>다운로드 목록</h2>
+            <div class="buttonRow">
+              <button id="openDownloadListFile" type="button" class="secondary">리스트 파일 열기</button>
+              <button id="openDownloadViewer" type="button" class="secondary">뷰어 열기</button>
+            </div>
+          </div>
+          <p class="hint flat">오늘 받은 이미지 목록은 로컬 저장소에 보관되며, 자동으로 JSON 파일을 다운로드하지 않습니다.</p>
         </section>
 
         <section>

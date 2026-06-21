@@ -24,21 +24,33 @@ const saveStatus = document.getElementById("saveStatus");
 const logList = document.getElementById("logList");
 const refreshLogs = document.getElementById("refreshLogs");
 const clearLogs = document.getElementById("clearLogs");
+const appVersion = document.getElementById("appVersion");
+const openDownloadListFile = document.getElementById("openDownloadListFile");
+const openDownloadViewer = document.getElementById("openDownloadViewer");
 
 document.addEventListener("DOMContentLoaded", loadOptions);
 form.addEventListener("submit", saveOptions);
 saveByDate.addEventListener("change", saveOptions);
 refreshLogs.addEventListener("click", loadLogs);
 clearLogs.addEventListener("click", clearCollectorLogs);
+openDownloadListFile.addEventListener("click", () => openExtensionPage("download-list-file.html"));
+openDownloadViewer.addEventListener("click", () => openExtensionPage("download-viewer.html"));
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "local" && changes[LOG_KEY]) {
     renderLogs(changes[LOG_KEY].newValue || []);
   }
 });
 
+function openExtensionPage(path) {
+  chrome.tabs.create({
+    url: chrome.runtime.getURL(path)
+  });
+}
+
 async function loadOptions() {
   const options = await chrome.storage.sync.get(DEFAULTS);
 
+  appVersion.textContent = chrome.runtime.getManifest().version;
   minWidth.value = toMinimumDimension(options.minWidth);
   minHeight.value = toMinimumDimension(options.minHeight);
   folder.value = options.folder || DEFAULTS.folder;

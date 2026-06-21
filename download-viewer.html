@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>짤 콜렉터 다운로드 뷰어</title>
+    <link rel="stylesheet" href="download-list.css">
+  </head>
+  <body>
+    <main class="page">
+      <header class="toolbar">
+        <div>
+          <h1>다운로드 뷰어</h1>
+          <p id="summary">로컬 저장소를 읽는 중입니다.</p>
+        </div>
+      </header>
+      <section class="tableWrap">
+        <table>
+          <thead>
+            <tr>
+              <th>저장 시간</th>
+              <th>원본 파일명</th>
+              <th>저장 파일명</th>
+              <th>페이지</th>
+              <th>이미지</th>
+            </tr>
+          </thead>
+          <tbody id="downloadRows"></tbody>
+        </table>
+        <p id="emptyState" class="emptyState" hidden>오늘 저장된 이미지가 없습니다.</p>
+      </section>
+    </main>
+
+    <script src="download-viewer.js"></script>
+  </body>
+</html>

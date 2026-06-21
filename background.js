@@ -27,13 +27,13 @@ const DEFAULT_RUNTIME = {
 
 const DAILY_STATS_KEY = "dailyStats";
 const DAILY_DOWNLOADS_KEY = "dailyDownloads";
-const DAILY_DOWNLOADS_FILENAME = "download-list.json";
 const LOG_KEY = "collectorLogs";
 const UPDATE_STATUS_KEY = "updateStatus";
 const MAX_LOG_ENTRIES = 200;
 
 const tabStates = new Map();
 const pausedHosts = new Map();
+let collectorDownloadUiHideDepth = 0;
 let lastActiveWebTabId = null;
 let dailyStatsWriteQueue = Promise.resolve();
 let dailyDownloadsWriteQueue = Promise.resolve();
@@ -60,7 +60,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 
   await syncActionIcon();
-  await setDownloadUiVisible(true);
+  await setChromeDownloadUiVisible(true);
   scheduleUpdateCheck();
   checkForUpdate({ force: true }).catch((error) => {
     console.warn("Jjal Collector could not check updates:", error);
@@ -69,7 +69,6 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabStates.delete(tabId);
-  syncDownloadUiVisibility();
 });
 
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
@@ -93,7 +92,9 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
 
 chrome.runtime.onStartup.addListener(() => {
   syncActionIcon();
-  syncDownloadUiVisibility();
+  setChromeDownloadUiVisible(true).catch((error) => {
+    console.warn("Jjal Collector could not restore download UI:", error);
+  });
   syncActiveTabCollection();
   scheduleUpdateCheck();
   checkForUpdate({ force: false }).catch((error) => {
@@ -113,10 +114,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "sync") {
-    if (changes.hideDownloadUi) {
-      syncDownloadUiVisibility();
-    }
-
     if (changes.includeBackgrounds || changes.includeSrcset) {
       syncActiveTabCollection();
     }
@@ -127,9 +124,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       syncActionIcon();
     }
 
-    if (changes.collectorActive) {
-      syncDownloadUiVisibility();
-    }
   }
 });
 
@@ -243,7 +237,6 @@ async function setCollectorActive(sourceTabId, active) {
   if (active) {
     getState(sourceTabId).stopReason = "";
     await syncActiveTabCollection(sourceTabId);
-    await syncDownloadUiVisibility();
     return getPublicState(sourceTabId);
   }
 
@@ -265,7 +258,6 @@ async function setCollectorActive(sourceTabId, active) {
     await updateBadge(tab.id);
   }));
 
-  await syncDownloadUiVisibility();
   return getPublicState(sourceTabId);
 }
 
@@ -283,7 +275,6 @@ async function resetDailyStats(tabId) {
   dailyDownloadsWriteQueue = dailyDownloadsWriteQueue.then(async () => {
     const downloads = createEmptyDailyDownloads();
     await saveDailyDownloads(downloads);
-    await tryExportDailyDownloads(downloads, await getOptions());
   });
   await dailyStatsWriteQueue;
   await dailyDownloadsWriteQueue;
@@ -392,7 +383,6 @@ function addDailyDownload(originalName, savedName, siteUrl, imageUrl, options) {
         savedAt: new Date().toISOString()
       });
       await saveDailyDownloads(downloads);
-      await tryExportDailyDownloads(downloads, options);
     })
     .catch((error) => {
       console.warn("Jjal Collector could not update daily download list:", error);
@@ -558,38 +548,6 @@ function compareVersions(left, right) {
   return 0;
 }
 
-async function exportDailyDownloads(downloads, options) {
-  const filename = buildDailyDownloadsFilename(options.folder);
-  const body = JSON.stringify(createDailyDownloadsExport(downloads), null, 2);
-  const url = `data:application/json;charset=utf-8,${encodeURIComponent(body)}`;
-
-  const downloadId = await chrome.downloads.download({
-    url,
-    filename,
-    conflictAction: "overwrite",
-    saveAs: false
-  });
-  await waitForDownloadComplete(downloadId);
-  await eraseDownloadHistory(downloadId);
-}
-
-async function tryExportDailyDownloads(downloads, options) {
-  try {
-    await exportDailyDownloads(downloads, options);
-  } catch (error) {
-    console.warn("Jjal Collector could not write daily download list file:", error);
-  }
-}
-
-function createDailyDownloadsExport(downloads) {
-  const items = Array.isArray(downloads.items) ? downloads.items : [];
-  return {
-    date: downloads.date || getTodayKey(),
-    count: items.length,
-    items
-  };
-}
-
 function countCandidateSources(candidates) {
   return candidates.reduce((counts, candidate) => {
     const source = candidate?.source || "unknown";
@@ -650,7 +608,6 @@ async function handleContentReady(tabId, pageUrl) {
   state.active = collectorActive && isWebUrl(pageUrl) && !pausedReason && await isFocusedActiveTab(tabId);
   state.stopReason = pausedReason;
   await updateBadge(tabId);
-  await syncDownloadUiVisibility();
   addLog("info", "콘텐츠 준비", {
     pageUrl,
     active: state.active,
@@ -994,14 +951,12 @@ async function collectCandidate(candidate, options) {
     height: candidate.height,
     source: candidate.source
   });
-  const downloadId = await chrome.downloads.download({
+  await downloadCollectorFile({
     url: candidate.url,
     filename,
     conflictAction: "uniquify",
     saveAs: false
-  });
-  await waitForDownloadComplete(downloadId);
-  await eraseDownloadHistory(downloadId);
+  }, options);
   await addDailyDownload(originalName, filename, candidate.pageUrl || candidate.url, candidate.url, options);
   addLog("info", "다운로드 완료", {
     url: candidate.url,
@@ -1010,6 +965,19 @@ async function collectCandidate(candidate, options) {
   await sleep(randomDelayMs());
 
   return "downloaded";
+}
+
+async function downloadCollectorFile(downloadOptions, options) {
+  const uiHidden = await pushCollectorDownloadUiHidden(options);
+
+  try {
+    const downloadId = await chrome.downloads.download(downloadOptions);
+    await waitForDownloadComplete(downloadId);
+    await eraseCollectorDownloadHistory(downloadId, options);
+    return downloadId;
+  } finally {
+    await popCollectorDownloadUiHidden(uiHidden);
+  }
 }
 
 function waitForDownloadComplete(downloadId) {
@@ -1065,11 +1033,54 @@ function waitForDownloadComplete(downloadId) {
   });
 }
 
-async function eraseDownloadHistory(downloadId) {
+async function eraseCollectorDownloadHistory(downloadId, options) {
+  if (!options?.hideDownloadUi) {
+    return;
+  }
+
   try {
     await chrome.downloads.erase({ id: downloadId });
   } catch (error) {
     console.warn("Jjal Collector could not erase download history:", error);
+  }
+}
+
+async function pushCollectorDownloadUiHidden(options) {
+  if (!options?.hideDownloadUi || !chrome.downloads.setUiOptions) {
+    return false;
+  }
+
+  collectorDownloadUiHideDepth += 1;
+  if (collectorDownloadUiHideDepth > 1) {
+    return true;
+  }
+
+  await setChromeDownloadUiVisible(false);
+  return true;
+}
+
+async function popCollectorDownloadUiHidden(uiHidden) {
+  if (!uiHidden) {
+    return;
+  }
+
+  collectorDownloadUiHideDepth = Math.max(0, collectorDownloadUiHideDepth - 1);
+  if (collectorDownloadUiHideDepth > 0) {
+    return;
+  }
+
+  await setChromeDownloadUiVisible(true);
+}
+
+async function setChromeDownloadUiVisible(enabled) {
+  if (!chrome.downloads.setUiOptions) {
+    return;
+  }
+
+  try {
+    await chrome.downloads.setUiOptions({ enabled });
+  } catch (error) {
+    console.warn("Jjal Collector could not change download UI:", error);
   }
 }
 
@@ -1160,10 +1171,6 @@ function getOriginalFilename(url) {
 function buildFilename(folder, originalName, saveByDate) {
   const dateFolder = saveByDate ? `${getTodayFolderName()}/` : "";
   return `${folder}/${dateFolder}${Date.now()}-${originalName}`;
-}
-
-function buildDailyDownloadsFilename(folder) {
-  return `${folder}/${DAILY_DOWNLOADS_FILENAME}`;
 }
 
 function getTodayFolderName() {
@@ -1353,24 +1360,6 @@ function getContentScanOptions(options) {
     includeBackgrounds: options.includeBackgrounds,
     includeSrcset: options.includeSrcset
   };
-}
-
-async function syncDownloadUiVisibility() {
-  const options = await getOptions();
-  const shouldHide = options.hideDownloadUi && await isCollectorActive();
-  await setDownloadUiVisible(!shouldHide);
-}
-
-async function setDownloadUiVisible(enabled) {
-  if (!chrome.downloads.setUiOptions) {
-    return;
-  }
-
-  try {
-    await chrome.downloads.setUiOptions({ enabled });
-  } catch (error) {
-    console.warn("Jjal Collector could not change download UI:", error);
-  }
 }
 
 async function isCollectorActive() {
