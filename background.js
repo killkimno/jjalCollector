@@ -14,6 +14,11 @@ const MAX_DELAY_MS = 1500;
 const ICON_SIZES = [16, 32, 48, 128];
 const CONSECUTIVE_FAILURE_LIMIT = 3;
 const HOST_PAUSE_MS = 10 * 60 * 1000;
+const UPDATE_REPOSITORY = "killkimno/jjalCollector";
+const UPDATE_RELEASE_API_URL = `https://api.github.com/repos/${UPDATE_REPOSITORY}/releases/latest`;
+const UPDATE_RELEASES_URL = `https://github.com/${UPDATE_REPOSITORY}/releases`;
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const UPDATE_ALARM_NAME = "checkLatestRelease";
 
 const DEFAULT_RUNTIME = {
   collectorActive: false
@@ -23,6 +28,7 @@ const DAILY_STATS_KEY = "dailyStats";
 const DAILY_DOWNLOADS_KEY = "dailyDownloads";
 const DAILY_DOWNLOADS_FILENAME = "download-list.json";
 const LOG_KEY = "collectorLogs";
+const UPDATE_STATUS_KEY = "updateStatus";
 const MAX_LOG_ENTRIES = 200;
 
 const tabStates = new Map();
@@ -54,6 +60,10 @@ chrome.runtime.onInstalled.addListener(async () => {
 
   await syncActionIcon();
   await setDownloadUiVisible(true);
+  scheduleUpdateCheck();
+  checkForUpdate({ force: true }).catch((error) => {
+    console.warn("Jjal Collector could not check updates:", error);
+  });
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -84,6 +94,20 @@ chrome.runtime.onStartup.addListener(() => {
   syncActionIcon();
   syncDownloadUiVisibility();
   syncActiveTabCollection();
+  scheduleUpdateCheck();
+  checkForUpdate({ force: false }).catch((error) => {
+    console.warn("Jjal Collector could not check updates:", error);
+  });
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== UPDATE_ALARM_NAME) {
+    return;
+  }
+
+  checkForUpdate({ force: false }).catch((error) => {
+    console.warn("Jjal Collector could not check updates:", error);
+  });
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -97,9 +121,14 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     }
   }
 
-  if (areaName === "local" && changes.collectorActive) {
-    syncActionIcon();
-    syncDownloadUiVisibility();
+  if (areaName === "local") {
+    if (changes.collectorActive || changes[UPDATE_STATUS_KEY]) {
+      syncActionIcon();
+    }
+
+    if (changes.collectorActive) {
+      syncDownloadUiVisibility();
+    }
   }
 });
 
@@ -157,6 +186,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     clearLogs()
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "GET_UPDATE_STATUS") {
+    checkForUpdate({ force: Boolean(message.force) })
+      .then((status) => sendResponse(status))
+      .catch((error) => sendResponse(createUpdateStatus({
+        error: error?.message || String(error)
+      })));
     return true;
   }
 
@@ -396,6 +434,118 @@ function addLog(level, message, details = {}) {
 async function clearLogs() {
   logWriteQueue = logWriteQueue.then(() => chrome.storage.local.set({ [LOG_KEY]: [] }));
   return logWriteQueue;
+}
+
+function scheduleUpdateCheck() {
+  chrome.alarms.create(UPDATE_ALARM_NAME, {
+    periodInMinutes: UPDATE_CHECK_INTERVAL_MS / 60000
+  });
+}
+
+async function checkForUpdate({ force = false } = {}) {
+  const stored = await getStoredUpdateStatus();
+  const now = Date.now();
+  const currentVersion = chrome.runtime.getManifest().version;
+
+  if (
+    !force &&
+    stored.checkedAt &&
+    stored.currentVersion === currentVersion &&
+    now - stored.checkedAt < UPDATE_CHECK_INTERVAL_MS
+  ) {
+    return stored;
+  }
+
+  try {
+    const response = await fetch(UPDATE_RELEASE_API_URL, {
+      headers: {
+        Accept: "application/vnd.github+json"
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`GitHub release check failed: ${response.status}`);
+    }
+
+    const release = await response.json();
+    const tagVersion = normalizeVersion(release.tag_name || release.name || "");
+    const latestVersion = tagVersion || "";
+    const available = latestVersion ? compareVersions(latestVersion, currentVersion) > 0 : false;
+    const status = createUpdateStatus({
+      checkedAt: now,
+      currentVersion,
+      latestVersion,
+      available,
+      releaseUrl: release.html_url || UPDATE_RELEASES_URL,
+      releaseName: release.name || release.tag_name || "",
+      publishedAt: release.published_at || "",
+      error: ""
+    });
+
+    await chrome.storage.local.set({ [UPDATE_STATUS_KEY]: status });
+    return status;
+  } catch (error) {
+    const latestVersion = stored.latestVersion || "";
+    const status = createUpdateStatus({
+      ...stored,
+      checkedAt: now,
+      currentVersion,
+      available: latestVersion ? compareVersions(latestVersion, currentVersion) > 0 : false,
+      error: error?.message || String(error)
+    });
+    await chrome.storage.local.set({ [UPDATE_STATUS_KEY]: status });
+    return status;
+  }
+}
+
+async function getStoredUpdateStatus() {
+  const currentVersion = chrome.runtime.getManifest().version;
+  const stored = await chrome.storage.local.get({
+    [UPDATE_STATUS_KEY]: createUpdateStatus({ currentVersion })
+  });
+  return createUpdateStatus({
+    ...stored[UPDATE_STATUS_KEY],
+    currentVersion: stored[UPDATE_STATUS_KEY]?.currentVersion || currentVersion
+  });
+}
+
+function createUpdateStatus(status = {}) {
+  return {
+    checkedAt: toNonNegativeNumber(status.checkedAt),
+    currentVersion: status.currentVersion || chrome.runtime.getManifest().version,
+    latestVersion: status.latestVersion || "",
+    available: status.available === true,
+    releaseUrl: status.releaseUrl || "",
+    releaseName: status.releaseName || "",
+    publishedAt: status.publishedAt || "",
+    error: status.error || ""
+  };
+}
+
+function normalizeVersion(value) {
+  const match = String(value).trim().match(/^v?(\d+(?:\.\d+){0,3})(?:[-+].*)?$/i);
+  return match ? match[1] : "";
+}
+
+function compareVersions(left, right) {
+  const leftParts = normalizeVersion(left).split(".").map((part) => Number(part));
+  const rightParts = normalizeVersion(right).split(".").map((part) => Number(part));
+  const length = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = Number.isFinite(leftParts[index]) ? leftParts[index] : 0;
+    const rightPart = Number.isFinite(rightParts[index]) ? rightParts[index] : 0;
+
+    if (leftPart > rightPart) {
+      return 1;
+    }
+
+    if (leftPart < rightPart) {
+      return -1;
+    }
+  }
+
+  return 0;
 }
 
 async function exportDailyDownloads(downloads, options) {
@@ -1052,23 +1202,34 @@ async function updateBadge(tabId) {
 
 async function syncActionIcon() {
   const active = await isCollectorActive();
+  const updateStatus = await getStoredUpdateStatus();
+  const hasUpdate = updateStatus.available === true;
 
   try {
     await chrome.action.setIcon({
       imageData: Object.fromEntries(ICON_SIZES.map((size) => [
         size,
-        createActionIcon(size, active)
+        createActionIcon(size, active, hasUpdate)
       ]))
     });
     await chrome.action.setTitle({
-      title: active ? "짤 콜렉터 켜짐" : "짤 콜렉터 꺼짐"
+      title: getActionTitle(active, updateStatus)
     });
   } catch (error) {
     console.warn("Jjal Collector could not update action icon:", error);
   }
 }
 
-function createActionIcon(size, active) {
+function getActionTitle(active, updateStatus) {
+  const stateText = active ? "짤 콜렉터 켜짐" : "짤 콜렉터 꺼짐";
+  if (updateStatus.available && updateStatus.latestVersion) {
+    return `${stateText} - 새 버전 v${updateStatus.latestVersion}`;
+  }
+
+  return stateText;
+}
+
+function createActionIcon(size, active, hasUpdate) {
   const data = new Uint8ClampedArray(size * size * 4);
   const background = active ? [37, 99, 235, 255] : [148, 163, 184, 255];
   const foreground = [255, 255, 255, 255];
@@ -1086,6 +1247,10 @@ function createActionIcon(size, active) {
     drawCheckMark(data, size, foreground);
   } else {
     drawPauseMark(data, size, foreground);
+  }
+
+  if (hasUpdate) {
+    drawUpdateMark(data, size);
   }
 
   return new ImageData(data, size, size);
@@ -1114,6 +1279,20 @@ function drawPauseMark(data, size, color) {
 
   fillRect(data, size, leftA, top, leftA + width, bottom, color);
   fillRect(data, size, leftB, top, leftB + width, bottom, color);
+}
+
+function drawUpdateMark(data, size) {
+  const alertColor = [239, 68, 68, 255];
+  const foreground = [255, 255, 255, 255];
+  const center = size * 0.76;
+  const radius = Math.max(4, size * 0.22);
+  fillCircle(data, size, center, size * 0.24, radius, alertColor);
+
+  const lineWidth = Math.max(1, Math.round(size * 0.08));
+  const top = Math.round(size * 0.12);
+  const bottom = Math.round(size * 0.28);
+  fillRect(data, size, Math.round(center - lineWidth / 2), top, Math.round(center + lineWidth / 2) + 1, bottom, foreground);
+  fillCircle(data, size, center, size * 0.36, Math.max(1, size * 0.035), foreground);
 }
 
 function drawLine(data, size, x1, y1, x2, y2, stroke, color) {

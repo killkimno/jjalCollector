@@ -9,6 +9,8 @@ const seenCount = document.getElementById("seenCount");
 const statusText = document.getElementById("statusText");
 const pageHost = document.getElementById("pageHost");
 const resetButton = document.getElementById("resetButton");
+const updateButton = document.getElementById("updateButton");
+const updateVersion = document.getElementById("updateVersion");
 const optionsButton = document.getElementById("optionsButton");
 
 document.addEventListener("DOMContentLoaded", init);
@@ -59,6 +61,21 @@ optionsButton.addEventListener("click", () => {
   chrome.runtime.openOptionsPage();
 });
 
+updateButton.addEventListener("click", async () => {
+  const status = await chrome.runtime.sendMessage({
+    type: "GET_UPDATE_STATUS",
+    force: false
+  });
+
+  if (!status?.releaseUrl) {
+    return;
+  }
+
+  chrome.tabs.create({
+    url: status.releaseUrl
+  });
+});
+
 async function init() {
   const [tab] = await chrome.tabs.query({
     active: true,
@@ -73,6 +90,7 @@ async function init() {
   activeTabId = tab.id;
   pageHost.textContent = getHostLabel(tab.url);
   await refreshState();
+  refreshUpdateStatus();
 
   refreshTimer = setInterval(refreshState, 1000);
 }
@@ -108,6 +126,33 @@ function renderState(state) {
   } else {
     statusText.textContent = "대기 중";
   }
+}
+
+async function refreshUpdateStatus() {
+  try {
+    const status = await chrome.runtime.sendMessage({
+      type: "GET_UPDATE_STATUS",
+      force: false
+    });
+    renderUpdateStatus(status);
+  } catch (_) {
+    renderUpdateStatus(null);
+  }
+}
+
+function renderUpdateStatus(status) {
+  const hasUpdate = status?.available === true && status.releaseUrl;
+  updateButton.hidden = !hasUpdate;
+
+  if (!hasUpdate) {
+    updateVersion.textContent = "업데이트";
+    updateButton.title = "";
+    return;
+  }
+
+  const version = status.latestVersion ? `v${status.latestVersion}` : "새 버전";
+  updateVersion.textContent = version;
+  updateButton.title = `${version} 업데이트 열기`;
 }
 
 function getHostLabel(url) {

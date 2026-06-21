@@ -5,6 +5,7 @@
   "description": "Collect matching images from the active webpage into a downloads folder.",
   "permissions": [
     "activeTab",
+    "alarms",
     "downloads",
     "downloads.ui",
     "scripting",
