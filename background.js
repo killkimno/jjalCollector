@@ -184,6 +184,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "OPEN_DOWNLOAD_FOLDER") {
+    openDownloadFolder()
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "CLEAR_DAILY_DOWNLOADS") {
+    clearDailyDownloads()
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
   if (message?.type === "GET_UPDATE_STATUS") {
     checkForUpdate({ force: Boolean(message.force) })
       .then((status) => sendResponse(status))
@@ -395,6 +409,14 @@ async function saveDailyDownloads(downloads) {
   await chrome.storage.local.set({
     [DAILY_DOWNLOADS_KEY]: downloads
   });
+}
+
+async function clearDailyDownloads() {
+  dailyDownloadsWriteQueue = dailyDownloadsWriteQueue.then(async () => {
+    await saveDailyDownloads(createEmptyDailyDownloads());
+  });
+  await dailyDownloadsWriteQueue;
+  addLog("info", "다운로드 목록 초기화");
 }
 
 function addLog(level, message, details = {}) {
@@ -1084,6 +1106,48 @@ async function setChromeDownloadUiVisible(enabled) {
   }
 }
 
+async function openDownloadFolder() {
+  const options = await getOptions();
+  const folder = buildDownloadFolder(options.folder, options.saveByDate);
+  const filename = `${folder}/.jjal-collector-open-folder.txt`;
+  let downloadId = null;
+
+  try {
+    downloadId = await chrome.downloads.download({
+      url: "data:text/plain;charset=utf-8,Jjal%20Collector",
+      filename,
+      conflictAction: "overwrite",
+      saveAs: false
+    });
+    await waitForDownloadComplete(downloadId);
+    await chrome.downloads.show(downloadId);
+    setTimeout(() => {
+      cleanupOpenFolderMarker(downloadId);
+    }, 4000);
+    addLog("info", "다운로드 폴더 열기", { folder });
+    return { folder };
+  } catch (error) {
+    if (downloadId !== null) {
+      cleanupOpenFolderMarker(downloadId);
+    }
+    throw error;
+  }
+}
+
+async function cleanupOpenFolderMarker(downloadId) {
+  try {
+    await chrome.downloads.removeFile(downloadId);
+  } catch (_) {
+    // The file may already be gone or unavailable while the folder is opening.
+  }
+
+  try {
+    await chrome.downloads.erase({ id: downloadId });
+  } catch (_) {
+    // Best-effort cleanup only.
+  }
+}
+
 function normalizeCandidate(candidate, pageUrl = "") {
   if (!candidate?.url || typeof candidate.url !== "string") {
     return null;
@@ -1171,6 +1235,10 @@ function getOriginalFilename(url) {
 function buildFilename(folder, originalName, saveByDate) {
   const dateFolder = saveByDate ? `${getTodayFolderName()}/` : "";
   return `${folder}/${dateFolder}${Date.now()}-${originalName}`;
+}
+
+function buildDownloadFolder(folder, saveByDate) {
+  return saveByDate ? `${folder}/${getTodayFolderName()}` : folder;
 }
 
 function getTodayFolderName() {

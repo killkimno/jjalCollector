@@ -66,7 +66,9 @@ h2 {
 
 .buttonRow {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
 }
 
 .grid {
@@ -200,6 +202,15 @@ button.secondary {
 
 button.secondary:hover {
   background: #f1f5f9;
+}
+
+button.secondary.danger {
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+button.secondary.danger:hover {
+  background: #fef2f2;
 }
 
 .logList {

@@ -9,7 +9,7 @@
   <body>
     <main class="page">
       <header>
-        <h1>짤 수집기 옵션</h1>
+        <h1>짤 콜렉터 옵션</h1>
         <p>기본값: 메인 OFF, 현재 포커스된 탭, 현재 화면에 보이는 480 x 480 이상 이미지.</p>
       </header>
 
@@ -91,8 +91,10 @@
           <div class="sectionHeader">
             <h2>다운로드 목록</h2>
             <div class="buttonRow">
+              <button id="openDownloadFolder" type="button" class="secondary">다운로드 폴더 열기</button>
               <button id="openDownloadListFile" type="button" class="secondary">리스트 파일 열기</button>
               <button id="openDownloadViewer" type="button" class="secondary">뷰어 열기</button>
+              <button id="clearDownloadList" type="button" class="secondary danger">리스트 초기화</button>
             </div>
           </div>
           <p class="hint flat">오늘 받은 이미지 목록은 로컬 저장소에 보관되며, 자동으로 JSON 파일을 다운로드하지 않습니다.</p>

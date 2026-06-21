@@ -10,6 +10,7 @@ const DEFAULTS = {
 };
 const MIN_IMAGE_DIMENSION = 480;
 const LOG_KEY = "collectorLogs";
+const DAILY_DOWNLOADS_KEY = "dailyDownloads";
 
 const form = document.getElementById("optionsForm");
 const minWidth = document.getElementById("minWidth");
@@ -25,16 +26,20 @@ const logList = document.getElementById("logList");
 const refreshLogs = document.getElementById("refreshLogs");
 const clearLogs = document.getElementById("clearLogs");
 const appVersion = document.getElementById("appVersion");
+const openDownloadFolder = document.getElementById("openDownloadFolder");
 const openDownloadListFile = document.getElementById("openDownloadListFile");
 const openDownloadViewer = document.getElementById("openDownloadViewer");
+const clearDownloadList = document.getElementById("clearDownloadList");
 
 document.addEventListener("DOMContentLoaded", loadOptions);
 form.addEventListener("submit", saveOptions);
 saveByDate.addEventListener("change", saveOptions);
 refreshLogs.addEventListener("click", loadLogs);
 clearLogs.addEventListener("click", clearCollectorLogs);
+openDownloadFolder.addEventListener("click", openCollectorDownloadFolder);
 openDownloadListFile.addEventListener("click", () => openExtensionPage("download-list-file.html"));
 openDownloadViewer.addEventListener("click", () => openExtensionPage("download-viewer.html"));
+clearDownloadList.addEventListener("click", clearDailyDownloadList);
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "local" && changes[LOG_KEY]) {
     renderLogs(changes[LOG_KEY].newValue || []);
@@ -45,6 +50,50 @@ function openExtensionPage(path) {
   chrome.tabs.create({
     url: chrome.runtime.getURL(path)
   });
+}
+
+async function openCollectorDownloadFolder() {
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "OPEN_DOWNLOAD_FOLDER" });
+    if (!response?.ok) {
+      throw new Error(response?.error || "Could not open download folder");
+    }
+    showStatus("다운로드 폴더를 열었습니다.");
+  } catch (error) {
+    showStatus("다운로드 폴더를 열 수 없습니다.");
+    console.warn("Jjal Collector could not open download folder:", error);
+  }
+}
+
+async function clearDailyDownloadList() {
+  if (!confirm("오늘 다운로드 목록을 초기화할까요? 같은 이미지 URL도 다시 받을 수 있게 됩니다.")) {
+    return;
+  }
+
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "CLEAR_DAILY_DOWNLOADS" });
+    if (response?.ok) {
+      showStatus("다운로드 목록을 초기화했습니다.");
+      return;
+    }
+  } catch (_) {
+    // Fall back to direct storage update below.
+  }
+
+  try {
+    await chrome.storage.local.set({
+      [DAILY_DOWNLOADS_KEY]: {
+        date: getTodayKey(),
+        filenames: {},
+        urls: {},
+        items: []
+      }
+    });
+    showStatus("다운로드 목록을 초기화했습니다.");
+  } catch (error) {
+    showStatus("다운로드 목록을 초기화할 수 없습니다.");
+    console.warn("Jjal Collector could not clear download list:", error);
+  }
 }
 
 async function loadOptions() {
@@ -95,6 +144,23 @@ function sanitizeFolder(value) {
     .replace(/[<>:"|?*]+/g, "-");
 
   return clean || DEFAULTS.folder;
+}
+
+function getTodayKey() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function showStatus(message) {
+  saveStatus.textContent = message;
+  setTimeout(() => {
+    if (saveStatus.textContent === message) {
+      saveStatus.textContent = "";
+    }
+  }, 1800);
 }
 
 async function loadLogs() {

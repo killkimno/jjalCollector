@@ -6,6 +6,8 @@
 
 ![짤 콜렉터 팝업 화면](assets/popup-preview.png)
 
+![다운로드 폴더 화면](assets/download-folder-preview.png)
+
 ## 기능
 
 - 확장을 켜면 이후 방문하는 일반 웹사이트의 이미지를 자동 수집합니다.
