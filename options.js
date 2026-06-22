@@ -11,6 +11,7 @@ const DEFAULTS = {
 const MIN_IMAGE_DIMENSION = 480;
 const LOG_KEY = "collectorLogs";
 const DAILY_DOWNLOADS_KEY = "dailyDownloads";
+const OPEN_FOLDER_MARKER_CLEANUP_MS = 30000;
 
 const form = document.getElementById("optionsForm");
 const minWidth = document.getElementById("minWidth");
@@ -53,16 +54,54 @@ function openExtensionPage(path) {
 }
 
 async function openCollectorDownloadFolder() {
+  openDownloadFolder.disabled = true;
+  showStatus("다운로드 폴더를 여는 중입니다...");
+
   try {
     const response = await chrome.runtime.sendMessage({ type: "OPEN_DOWNLOAD_FOLDER" });
     if (!response?.ok) {
       throw new Error(response?.error || "Could not open download folder");
     }
+    showDownloadFolderItem(response.downloadId);
+    scheduleOpenFolderMarkerCleanup(response.downloadId);
     showStatus("다운로드 폴더를 열었습니다.");
   } catch (error) {
     showStatus("다운로드 폴더를 열 수 없습니다.");
     console.warn("Jjal Collector could not open download folder:", error);
+  } finally {
+    openDownloadFolder.disabled = false;
   }
+}
+
+function showDownloadFolderItem(downloadId) {
+  const id = Number(downloadId);
+  if (Number.isInteger(id) && id > 0 && chrome.downloads?.show) {
+    chrome.downloads.show(id);
+    return;
+  }
+
+  if (chrome.downloads?.showDefaultFolder) {
+    chrome.downloads.showDefaultFolder();
+    return;
+  }
+
+  throw new Error("Downloads folder API is not available");
+}
+
+function scheduleOpenFolderMarkerCleanup(downloadId) {
+  const id = Number(downloadId);
+  if (!Number.isInteger(id) || id <= 0) {
+    return;
+  }
+
+  setTimeout(() => {
+    chrome.runtime.sendMessage({
+      type: "CLEANUP_OPEN_FOLDER_MARKER",
+      downloadId: id
+    }).catch(() => {
+      // The background worker may have already cleaned up the marker.
+    });
+  }, OPEN_FOLDER_MARKER_CLEANUP_MS);
 }
 
 async function clearDailyDownloadList() {

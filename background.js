@@ -20,6 +20,7 @@ const UPDATE_RELEASE_API_URL = `https://api.github.com/repos/${UPDATE_REPOSITORY
 const UPDATE_RELEASES_URL = `https://github.com/${UPDATE_REPOSITORY}/releases`;
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_ALARM_NAME = "checkLatestRelease";
+const OPEN_FOLDER_MARKER_CLEANUP_MS = 30000;
 
 const DEFAULT_RUNTIME = {
   collectorActive: false
@@ -187,6 +188,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "OPEN_DOWNLOAD_FOLDER") {
     openDownloadFolder()
       .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "CLEANUP_OPEN_FOLDER_MARKER") {
+    cleanupOpenFolderMarker(message.downloadId)
+      .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
@@ -1109,7 +1117,7 @@ async function setChromeDownloadUiVisible(enabled) {
 async function openDownloadFolder() {
   const options = await getOptions();
   const folder = buildDownloadFolder(options.folder, options.saveByDate);
-  const filename = `${folder}/.jjal-collector-open-folder.txt`;
+  const filename = `${folder}/jjal-collector-open-folder.txt`;
   let downloadId = null;
 
   try {
@@ -1119,13 +1127,15 @@ async function openDownloadFolder() {
       conflictAction: "overwrite",
       saveAs: false
     });
+    if (!Number.isInteger(downloadId) || downloadId <= 0) {
+      throw new Error("Could not create download folder marker");
+    }
     await waitForDownloadComplete(downloadId);
-    await chrome.downloads.show(downloadId);
     setTimeout(() => {
       cleanupOpenFolderMarker(downloadId);
-    }, 4000);
-    addLog("info", "다운로드 폴더 열기", { folder });
-    return { folder };
+    }, OPEN_FOLDER_MARKER_CLEANUP_MS);
+    addLog("info", "다운로드 폴더 열기 준비", { folder, downloadId });
+    return { folder, downloadId };
   } catch (error) {
     if (downloadId !== null) {
       cleanupOpenFolderMarker(downloadId);
@@ -1135,14 +1145,19 @@ async function openDownloadFolder() {
 }
 
 async function cleanupOpenFolderMarker(downloadId) {
+  const id = Number(downloadId);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error("Invalid download marker id");
+  }
+
   try {
-    await chrome.downloads.removeFile(downloadId);
+    await chrome.downloads.removeFile(id);
   } catch (_) {
     // The file may already be gone or unavailable while the folder is opening.
   }
 
   try {
-    await chrome.downloads.erase({ id: downloadId });
+    await chrome.downloads.erase({ id });
   } catch (_) {
     // Best-effort cleanup only.
   }
